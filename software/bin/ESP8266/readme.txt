@@ -1,0 +1,1 @@
+Firmware for ESP8266 has to be compiled by yourself, as you have to input WiFi credentials.

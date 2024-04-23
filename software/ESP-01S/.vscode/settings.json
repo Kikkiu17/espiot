@@ -1,0 +1,19 @@
+{
+    "files.associations": {
+        "*.tcc": "cpp",
+        "chrono": "cpp",
+        "ctime": "cpp",
+        "limits": "cpp",
+        "numeric": "cpp",
+        "ranges": "cpp",
+        "ratio": "cpp",
+        "streambuf": "cpp",
+        "tuple": "cpp",
+        "type_traits": "cpp",
+        "utility": "cpp",
+        "optional": "cpp",
+        "system_error": "cpp",
+        "regex": "cpp"
+    },
+    "cmake.configureOnOpen": false
+}
