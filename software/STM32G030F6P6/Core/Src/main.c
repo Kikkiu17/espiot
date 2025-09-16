@@ -18,11 +18,22 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
+#include "dma.h"
+#include "tim.h"
+#include "usart.h"
+#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
+
+#include "../credentials.h"
+#include "../ESP8266/esp8266.h"
+#include "../wifihandler/wifihandler.h"
+#include "../Flash/flash.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,25 +53,17 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef hadc1;
-DMA_HandleTypeDef hdma_adc1;
-
-TIM_HandleTypeDef htim3;
-
-UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 uint16_t adc_buf[ADC_BUF_LEN];
 uint32_t previous_voltage = 0;
+
+WIFI_t wifi;
+Connection_t conn;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
-static void MX_ADC1_Init(void);
-static void MX_USART1_UART_Init(void);
-static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -97,7 +100,7 @@ float SENS_GetCurrent()
 	// adjust_value == 1.37 * 1.9145
 	float adjust_value = 2.62286;
 	float abs_amplitude = fabsf(max - min);
-  // used with this particular ACS sensor, since its reading is not linear under 0.6A
+	// used with this particular ACS sensor, since its reading is not linear under 0.6A
 	if (abs_amplitude < 0.25)
 		adjust_value = 2.09;
 
@@ -159,6 +162,7 @@ HAL_StatusTypeDef ESP_SendRawValue(uint32_t value, uint32_t received_byte)
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -186,6 +190,34 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+  ESP8266_Init();
+
+  if (ESP8266_CheckAT() != OK)
+  {
+	  if (ESP8266_ResetWaitReady() != OK)
+	  {
+		  while (1)
+		  {
+			  HAL_GPIO_TogglePin(STATUS_Port, STATUS_Pin);
+			  HAL_Delay(25);
+		  }
+	  }
+  }
+
+  memcpy(wifi.SSID, ssid, strlen(ssid));
+  memcpy(wifi.pw, password, strlen(password));
+  WIFI_Connect(&wifi);
+  WIFI_SetName(&wifi, (char*)ESP_NAME);
+
+  WIFI_SetCWMODE(1);
+  WIFI_SetCIPMUX(1);
+  WIFI_SetCIPSERVER(SERVER_PORT);
+
+#ifdef ENABLE_SAVE_TO_FLASH
+  FLASH_ReadSaveData();
+  WIFI_SetName(&wifi, savedata.name);
+#endif
+
   HAL_ADCEx_Calibration_Start(&hadc1);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buf, ADC_BUF_LEN);
   HAL_TIM_Base_Start(&htim3);
@@ -195,9 +227,63 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  Response_t wifistatus = WAITING;
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, 1);
   while (1)
   {
-	  uint8_t uart_buf[11];
+	  wifistatus = WAITING;
+	  // HANDLE WIFI CONNECTION
+	  wifistatus = WIFI_ReceiveRequest(&wifi, &conn, AT_SHORT_TIMEOUT);
+	  if (wifistatus == OK)
+	  {
+		  HAL_GPIO_TogglePin(STATUS_Port, STATUS_Pin);
+		  char* key_ptr = NULL;
+
+		  if ((key_ptr = WIFI_RequestHasKey(&conn, "wifi")))
+			  WIFIHANDLER_HandleWiFiRequest(&conn, key_ptr);
+
+		  else if (conn.request_type == GET)
+		  {
+			  if ((key_ptr = WIFI_RequestHasKey(&conn, "features")))
+			  {
+				  feature_voltage = SENS_GetVoltage();
+				  float current = SENS_GetCurrent();
+				  if (current < CURRENT_THRESHOLD)
+					  current = 0.0f;
+				  feature_current_integer_part = current;
+				  feature_current_decimal_part = current * 100 - feature_current_integer_part * 100;
+				  float power = SENS_GetVoltage() * SENS_GetCurrent();
+				  feature_power_integer_part = power;
+				  feature_power_decimal_part = power * 100 - feature_power_integer_part * 100;
+				  WIFIHANDLER_HandleFeaturePacket(&conn, (char*)FEATURES_TEMPLATE);
+			  }
+			  else if ((key_ptr = WIFI_RequestHasKey(&conn, "notification")))
+				  WIFIHANDLER_HandleNotificationRequest(&conn, key_ptr);
+			  // other GET requests code here...
+
+			  else WIFI_SendResponse(&conn, "404 Not Found", "Unknown command", 15);
+		  }
+
+		  else if (conn.request_type == POST)
+		  {
+			  // other POST requests code here...
+		  }
+
+		  // other requests code here...
+
+		  HAL_GPIO_TogglePin(STATUS_Port, STATUS_Pin);
+	  }
+	  else if (wifistatus != TIMEOUT)
+	  {
+		  sprintf(wifi.buf, "Status: %d", wifistatus);
+		  WIFI_ResetComm(&wifi, &conn);
+		  WIFI_SendResponse(&conn, "500 Internal server error", wifi.buf, strlen(wifi.buf));
+	  }
+
+	  WIFI_ResetConnectionIfError(&wifi, &conn, wifistatus);
+
+	  LED_Strobe();
+	  /*uint8_t uart_buf[11];
 	  GPIOB->BSRR |= GPIO_PIN_0;
 	  HAL_UART_Receive(&huart1, uart_buf, 11, 10);
 	  GPIOB->BRR |= GPIO_PIN_0;
@@ -223,16 +309,14 @@ int main(void)
 	  else if (uart_buf[0] == 0x14)
 	  {
 		  uart_buf[0] = 0x00;
-		  /*
-		   * the power value can be calculated in the esp8266, but why not doing it here?
-		   */
+		  // the power value can be calculated in the esp8266, but why not doing it here?
 		  uint32_t power = SENS_GetVoltage() * SENS_GetCurrent();
 		  ESP_SendRawValue(power, 0x14);
 	  }
 	  else if (uart_buf[0] == 0x15)
 	  {
 		  NVIC_SystemReset();
-	  }
+	  }*/
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -283,226 +367,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-}
-
-/**
-  * @brief ADC1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_ADC1_Init(void)
-{
-
-  /* USER CODE BEGIN ADC1_Init 0 */
-
-  /* USER CODE END ADC1_Init 0 */
-
-  ADC_ChannelConfTypeDef sConfig = {0};
-
-  /* USER CODE BEGIN ADC1_Init 1 */
-
-  /* USER CODE END ADC1_Init 1 */
-
-  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
-  */
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.LowPowerAutoPowerOff = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 2;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T3_TRGO;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
-  hadc1.Init.DMAContinuousRequests = ENABLE;
-  hadc1.Init.Overrun = ADC_OVR_DATA_OVERWRITTEN;
-  hadc1.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_3CYCLES_5;
-  hadc1.Init.SamplingTimeCommon2 = ADC_SAMPLETIME_79CYCLES_5;
-  hadc1.Init.OversamplingMode = ENABLE;
-  hadc1.Init.Oversampling.Ratio = ADC_OVERSAMPLING_RATIO_256;
-  hadc1.Init.Oversampling.RightBitShift = ADC_RIGHTBITSHIFT_8;
-  hadc1.Init.Oversampling.TriggeredMode = ADC_TRIGGEREDMODE_SINGLE_TRIGGER;
-  hadc1.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_HIGH;
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_4;
-  sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLINGTIME_COMMON_1;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_5;
-  sConfig.Rank = ADC_REGULAR_RANK_2;
-  sConfig.SamplingTime = ADC_SAMPLINGTIME_COMMON_2;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN ADC1_Init 2 */
-
-  /* USER CODE END ADC1_Init 2 */
-
-}
-
-/**
-  * @brief TIM3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM3_Init(void)
-{
-
-  /* USER CODE BEGIN TIM3_Init 0 */
-
-  /* USER CODE END TIM3_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM3_Init 1 */
-
-  /* USER CODE END TIM3_Init 1 */
-  htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 4-1;
-  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 1200;
-  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM3_Init 2 */
-
-  /* USER CODE END TIM3_Init 2 */
-
-}
-
-/**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART1_Init 0 */
-
-  /* USER CODE END USART1_Init 0 */
-
-  /* USER CODE BEGIN USART1_Init 1 */
-
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
-
-}
-
-/**
-  * Enable DMA controller clock
-  */
-static void MX_DMA_Init(void)
-{
-
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
-
-  /* DMA interrupt init */
-  /* DMA1_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-
-}
-
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
-
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PB0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
