@@ -8,7 +8,6 @@
 #include "flash.h"
 #include <string.h>
 
-#ifdef ENABLE_SAVE_TO_FLASH
 SaveData_t savedata;
 
 void FLASH_EraseLastPage()
@@ -55,5 +54,4 @@ void FLASH_ReadSaveData()
 	uint32_t read_addr = LAST_PAGE_ADDRESS;
 	memcpy(&savedata, ((SaveData_t*)read_addr), sizeof(SaveData_t));
 }
-#endif
 
