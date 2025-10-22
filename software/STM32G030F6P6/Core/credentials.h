@@ -8,7 +8,7 @@
 #ifndef CREDENTIALS_H_
 #define CREDENTIALS_H_
 
-const char ssid[] = "Vodafone-A51708736";
-const char password[] = "da6ks5pzbewmywf7";
+const char ssid[] = "xxxxxxxxxxxxxxxxxxx";
+const char password[] = "xxxxxxxxxxxxxxxxxxxx";
 
 #endif /* CREDENTIALS_H_ */
