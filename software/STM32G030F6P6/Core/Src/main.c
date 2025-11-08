@@ -229,8 +229,17 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   Response_t wifistatus = WAITING;
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, 1);
+  uint32_t reconnection_timestamp = 0;
   while (1)
   {
+	  if (uwTick - reconnection_timestamp > RECONNECTION_DELAY_MILLIS)
+	  {
+		  // check every RECONNECTION_DELAY_MINS if this device is connected to wifi. if it is, get
+		  // latest connection info, otherwise connect
+		  WIFI_Connect(&wifi);
+		  reconnection_timestamp = uwTick;
+	  }
+
 	  wifistatus = WAITING;
 	  // HANDLE WIFI CONNECTION
 	  wifistatus = WIFI_ReceiveRequest(&wifi, &conn, AT_SHORT_TIMEOUT);
@@ -412,8 +421,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.

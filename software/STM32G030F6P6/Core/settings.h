@@ -99,6 +99,9 @@ static const char ESP_NAME[] = "Frigo";
 #define UART_TX_TIMEOUT 500			// ms
 #define UART_RX_IDLE_TIMEOUT 3000	// ms
 
+#define RECONNECTION_DELAY_MINS 1	// minutes
+#define RECONNECTION_DELAY_MILLIS RECONNECTION_DELAY_MINS * 60000
+
 typedef struct notif
 {
 	char* text;
