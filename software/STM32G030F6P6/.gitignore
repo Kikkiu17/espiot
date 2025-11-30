@@ -1,8 +1,8 @@
+*.launch
+*.ld
 Debug/
 Drivers/
 Release/
-*.launch
-*.ld
 *.s
 *.json
 credentials.h

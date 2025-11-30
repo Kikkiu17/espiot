@@ -99,7 +99,7 @@ static const char ESP_NAME[] = "Frigo";
 #define UART_TX_TIMEOUT 500			// ms
 #define UART_RX_IDLE_TIMEOUT 3000	// ms
 
-#define RECONNECTION_DELAY_MINS 1	// minutes
+#define RECONNECTION_DELAY_MINS 0.5	// minutes
 #define RECONNECTION_DELAY_MILLIS RECONNECTION_DELAY_MINS * 60000
 
 typedef struct notif
@@ -136,6 +136,10 @@ extern SaveData_t savedata;
 #define STROBE_DURATION 12
 #define START_ATTEMPTS 4
 #define CURRENT_THRESHOLD 0.05 // amperes
+#define ADC_BUF_LEN 2048
+#define CURRENT_DEAD_ZONE 0.025		// 0.095 without OVERSAMPLING; 0.025 for 256x, 8-bit shift
+#define CURRENT_CALIB_VALUE 1.030
+#define VOLTAGE_CALIB_VALUE	0.957
 
 // ==========================================================================================
 // 										COMM TEMPLATE

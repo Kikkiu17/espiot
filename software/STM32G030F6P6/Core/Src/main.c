@@ -43,8 +43,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define ADC_BUF_LEN 2048
-#define CURRENT_DEAD_ZONE 0.025		// 0.095 without OVERSAMPLING; 0.025 for 256x, 8-bit shift
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -105,10 +104,10 @@ float SENS_GetCurrent()
 		adjust_value = 2.09;
 
 	// abs_amplitude * 1.37 * 1.9145
-	float Irms = abs_amplitude * adjust_value;
+	float Irms = abs_amplitude * adjust_value * CURRENT_CALIB_VALUE;
 
 	if (Irms <= CURRENT_DEAD_ZONE) return 0;
-		else return Irms;
+	else return Irms;
 }
 
 
@@ -133,7 +132,7 @@ uint32_t SENS_GetVoltage()
 	voltage = (voltage + previous_voltage) / 2;
 		previous_voltage = voltage;
 
-	return voltage;
+	return voltage * VOLTAGE_CALIB_VALUE;
 }
 
 
@@ -192,18 +191,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   ESP8266_Init();
 
-  if (ESP8266_CheckAT() != OK)
-  {
-	  if (ESP8266_ResetWaitReady() != OK)
-	  {
-		  while (1)
-		  {
-			  HAL_GPIO_TogglePin(STATUS_Port, STATUS_Pin);
-			  HAL_Delay(25);
-		  }
-	  }
-  }
-
   memcpy(wifi.SSID, ssid, strlen(ssid));
   memcpy(wifi.pw, password, strlen(password));
   WIFI_Connect(&wifi);
@@ -261,7 +248,7 @@ int main(void)
 					  current = 0.0f;
 				  feature_current_integer_part = current;
 				  feature_current_decimal_part = current * 100 - feature_current_integer_part * 100;
-				  float power = SENS_GetVoltage() * SENS_GetCurrent();
+				  float power = feature_voltage * current;
 				  feature_power_integer_part = power;
 				  feature_power_decimal_part = power * 100 - feature_power_integer_part * 100;
 				  WIFIHANDLER_HandleFeaturePacket(&conn, (char*)FEATURES_TEMPLATE);
