@@ -38,8 +38,8 @@ typedef struct
 	char		buf[WIFI_BUF_MAX_SIZE + 1];
 	char		hostname[HOSTNAME_MAX_SIZE + 1];
 	char		name[NAME_MAX_SIZE + 1];
-	char		time[8];	// hh:mm:ss
-	uint32_t	last_time_read;
+	char		time[8 + 1];	// hh:mm:ss
+	int32_t	last_time_read;
 } WIFI_t;
 
 typedef struct

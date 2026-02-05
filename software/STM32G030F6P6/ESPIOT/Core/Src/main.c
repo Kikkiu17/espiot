@@ -206,15 +206,15 @@ int main(void)
 
   memcpy(wifi.SSID, ssid, strlen(ssid));
   memcpy(wifi.pw, password, strlen(password));
-  if (WIFI_Connect(&wifi) == FAIL)
+  HAL_GPIO_WritePin(STATUS_Port, STATUS_Pin, 1);
+  uint32_t connect_status = WIFI_Connect(&wifi);
+  if (connect_status == FAIL || connect_status == ERROR)
   {
-    // restore ESP to factory defaults and try again
-    if (ESP8266_Restore() == OK)
-      NVIC_SystemReset();
-    else
-      // error while restoring ESP
-      while (1) { __NOP(); }
+    // try again
+    NVIC_SystemReset();
   }
+  HAL_GPIO_WritePin(STATUS_Port, STATUS_Pin, 0);
+  WIFI_EnableNTPServer(&wifi, 0);
 
   /*
   The first time the ESP connects to WiFi, the gateway assigns an IP to it, which now gets saved to FLASH.
@@ -230,24 +230,22 @@ int main(void)
   HAL_ADCEx_Calibration_Start(&hadc1);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_buf, ADC_BUF_LEN);
   HAL_TIM_Base_Start(&htim3);
-
-  HAL_Delay(250);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   Response_t wifistatus = WAITING;
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, 1);
-  uint32_t reconnection_timestamp = 0;
+  //uint32_t reconnection_timestamp = 0;
   while (1)
   {
-	  if (uwTick - reconnection_timestamp > RECONNECTION_DELAY_MILLIS)
+	  /*if (uwTick - reconnection_timestamp > RECONNECTION_DELAY_MILLIS)
 	  {
 		  // check every RECONNECTION_DELAY_MINS if this device is connected to wifi. if it is, get
 		  // latest connection info, otherwise connect
 		  WIFI_Connect(&wifi);
 		  reconnection_timestamp = uwTick;
-	  }
+	  }*/
 
 	  wifistatus = WAITING;
 	  // HANDLE WIFI CONNECTION
@@ -299,8 +297,6 @@ int main(void)
 	  }
 
 	  WIFI_ResetConnectionIfError(&wifi, &conn, wifistatus);
-
-	  LED_Strobe();
 	  /*uint8_t uart_buf[11];
 	  GPIOB->BSRR |= GPIO_PIN_0;
 	  HAL_UART_Receive(&huart1, uart_buf, 11, 10);
